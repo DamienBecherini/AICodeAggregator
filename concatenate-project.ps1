@@ -1,7 +1,8 @@
 ﻿<#
 .SYNOPSIS
     Concatène les fichiers d'un projet en un seul fichier de sortie,
-    en excluant les éléments spécifiés dans concat-config.yaml.
+    en incluant une arborescence des fichiers dans l'en-tête et en excluant
+    les éléments spécifiés dans concat-config.yaml.
 
 .DESCRIPTION
     Ce script est compatible avec Windows PowerShell 5.1 et versions ultérieures.
@@ -66,12 +67,41 @@ if (-not (Test-Path $BuildDir)) {
     New-Item -ItemType Directory -Path $BuildDir | Out-Null
 }
 
-# --- GÉNÉRATION DE L'EN-TÊTE DU FICHIER DE SORTIE ---
+# --- TRAITEMENT ET FILTRAGE DES FICHIERS (AVANT LA GÉNÉRATION DE L'EN-TÊTE) ---
+Write-Host "Recherche et filtrage des fichiers..."
+$excludeDirsRegex = ($config.exclude_dirs | ForEach-Object { [regex]::Escape($_) }) -join '|'
+$filesToProcess = Get-ChildItem -Path $ResolvedProjectPath -Recurse -File | Where-Object {
+    $file = $_
+    # On vérifie si le chemin complet contient un des répertoires à exclure entouré de séparateurs de chemin
+    $isDirExcluded = $file.FullName -match "\\($excludeDirsRegex)\\"
+    $isExtExcluded = $config.exclude_extensions -contains $file.Extension
+    $isFileExcluded = $config.exclude_files -contains $file.Name
+    -not ($isDirExcluded -or $isExtExcluded -or $isFileExcluded)
+}
+
+# --- NOUVEAU : GÉNÉRATION DE L'ARBORESCENCE POUR L'EN-TÊTE ---
+Write-Host "Génération de l'arborescence pour l'en-tête..."
+$projectTree = $filesToProcess | ForEach-Object {
+    # On calcule le chemin relatif pour chaque fichier
+    $_.FullName.Replace($ResolvedProjectPath, '').TrimStart('\').TrimStart('/')
+} | Sort-Object | ForEach-Object {
+    # On préfixe chaque ligne pour une meilleure lisibilité
+    "  - $_"
+} | Out-String
+
+# --- GÉNÉRATION DE L'EN-TÊTE DU FICHIER DE SORTIE (INCLUANT L'ARBORESCENCE) ---
 $Header = @"
 ================================================================================
 Projet              : $ProjectName
-Date de génération  : 30 août 2025
+Date de génération  : $(Get-Date -Format "dd MMMM yyyy HH:mm:ss")
 Généré par          : Script PowerShell (concatenate-project.ps1)
+Fichiers inclus     : $($filesToProcess.Count)
+================================================================================
+
+ARBORESCENCE DES FICHIERS INCLUS :
+--------------------------------------------------------------------------------
+$($ProjectName)/
+$projectTree
 ================================================================================
 
 Ce fichier est une concaténation de plusieurs fichiers sources du projet.
@@ -79,20 +109,10 @@ Chaque fichier est précédé d'un en-tête indiquant son chemin d'origine.
 
 "@
 
-# MODIFICATION n°1: Utiliser Out-File pour créer le fichier avec un encodage UTF-8 avec BOM
+# Création du fichier de sortie avec l'en-tête complet
 Out-File -FilePath $OutputFilePath -InputObject $Header -Encoding utf8
 
-# --- TRAITEMENT DES FICHIERS ---
-Write-Host "Recherche et filtrage des fichiers..."
-$excludeDirsRegex = ($config.exclude_dirs | ForEach-Object { [regex]::Escape($_) }) -join '|'
-$filesToProcess = Get-ChildItem -Path $ResolvedProjectPath -Recurse -File | Where-Object {
-    $file = $_
-    $isDirExcluded = $file.FullName -match "\\($excludeDirsRegex)\\"
-    $isExtExcluded = $config.exclude_extensions -contains $file.Extension
-    $isFileExcluded = $config.exclude_files -contains $file.Name
-    -not ($isDirExcluded -or $isExtExcluded -or $isFileExcluded)
-}
-
+# --- CONCATÉNATION DES FICHIERS ---
 Write-Host "Concaténation de $($filesToProcess.Count) fichiers..."
 
 foreach ($file in $filesToProcess) {
@@ -108,10 +128,10 @@ foreach ($file in $filesToProcess) {
 
 "@
     
-    # MODIFICATION n°2: Utiliser Out-File avec -Append pour ajouter du contenu
+    # Ajout de l'en-tête du fichier
     Out-File -FilePath $OutputFilePath -InputObject $fileHeader -Encoding utf8 -Append
     
-    # MODIFICATION n°3: Lire le fichier source en spécifiant l'encodage UTF-8
+    # Ajout du contenu du fichier
     $fileContent = Get-Content -Path $file.FullName -Raw -Encoding UTF8 -ErrorAction SilentlyContinue
     Out-File -FilePath $OutputFilePath -InputObject $fileContent -Encoding utf8 -Append
 }
