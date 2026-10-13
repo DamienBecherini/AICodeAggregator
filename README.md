@@ -52,7 +52,7 @@ Un script PowerShell simple et puissant pour fusionner tous les fichiers texte d
 
 ## Licence
 
-Ce projet est dédié au domaine public via la licence [Creative Commons CC0 1.0 Universal](LICENSE).
+Ce projet est publié sous [licence MIT](LICENSE).
 
 ## Mots-clés / Tags
 
